@@ -2,15 +2,15 @@ import * as THREE from "three"
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useFrame, useThree } from "@react-three/fiber"
 import { useGLTF } from "@react-three/drei"
-import { RigidBody, CuboidCollider } from "@react-three/rapier"
+import { RigidBody, CuboidCollider, TrimeshCollider } from "@react-three/rapier"
 import { create } from "zustand"
 
 import { useStore } from "../hooks/useStore"
 
 // Phần bổ sung của Vũ Đức An: khối lập phương ảnh album, vật lý thật.
-// - Trên cạn (đảo): địa hình là vật cản rắn, khối rơi xuống và nằm yên.
-// - Trên nước (dưới mực nước): có lực nổi, khối bồng bềnh trên mặt.
-// - Kéo chuột để cầm & ném khối.
+// - Trên cạn (đảo): collider trimesh rắn -> khối nằm yên trên cát.
+// - Trên nước: lực nổi -> khối bồng bềnh trên mặt.
+// - Kéo chuột để cầm & ném.
 
 const SUPABASE_URL = "https://huhzwawyysehjtofkpvb.supabase.co"
 const SUPABASE_KEY = "sb_publishable_U0L64ODHeuid599c6oRgvw_5fM-2D8n"
@@ -20,8 +20,8 @@ const TERRAIN_URL = `${import.meta.env.BASE_URL}models/terrain.glb`
 
 const SIZE = 1.7
 const MAX = 30
+const LIMIT = 14 // số ảnh tải tối đa (đủ cho 6 mặt mỗi khối, dùng lại)
 
-// store dùng chung giữa nút DOM và scene
 export const useCubesStore = create((set) => ({
   spawnSignal: 0,
   spawn: () => set((s) => ({ spawnSignal: s.spawnSignal + 1 })),
@@ -29,12 +29,26 @@ export const useCubesStore = create((set) => ({
   setDragging: (v) => set({ dragging: v }),
 }))
 
-// vật cản địa hình (rắn) – trùng hình với đảo nhưng vô hình
+// vật cản địa hình rắn — collider trimesh tường minh từ geometry của đảo
 function TerrainCollider() {
   const { nodes } = useGLTF(TERRAIN_URL)
+  const data = useMemo(() => {
+    const geo = nodes.plane.geometry
+    const vertices = geo.attributes.position.array
+    let indices
+    if (geo.index) {
+      indices = new Uint32Array(geo.index.array)
+    } else {
+      const n = vertices.length / 3
+      indices = new Uint32Array(n)
+      for (let i = 0; i < n; i++) indices[i] = i
+    }
+    return { vertices, indices }
+  }, [nodes])
+
   return (
-    <RigidBody type="fixed" colliders="trimesh">
-      <mesh geometry={nodes.plane.geometry} visible={false} />
+    <RigidBody type="fixed" colliders={false} friction={1}>
+      <TrimeshCollider args={[data.vertices, data.indices]} />
     </RigidBody>
   )
 }
@@ -51,14 +65,14 @@ export const Cubes = () => {
   const texturesRef = useRef([])
   const [cubes, setCubes] = useState([])
   const idRef = useRef(0)
-  const bodies = useRef({}) // id -> rapier body
+  const bodies = useRef({})
 
-  const grabbed = useRef(null) // { id, rb }
+  const grabbed = useRef(null)
   const dragPlane = useRef(new THREE.Plane())
   const tmp = useRef(new THREE.Vector3())
   const camDir = useRef(new THREE.Vector3())
 
-  // tải ảnh album
+  // tải ảnh album — SONG SONG, gieo khối ngay khi có vài ảnh đầu
   useEffect(() => {
     let alive = true
     ;(async () => {
@@ -91,24 +105,28 @@ export const Cubes = () => {
       }
       const tl = new THREE.TextureLoader()
       tl.setCrossOrigin("anonymous")
-      const loaded = []
-      for (const p of photos) {
+      let seeded = false
+      const jobs = photos.slice(0, LIMIT).map((p) => {
         const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${encodeURIComponent(
           p.name
         )}`
-        try {
-          const t = await tl.loadAsync(url)
-          if ("colorSpace" in t) t.colorSpace = THREE.SRGBColorSpace
-          loaded.push(t)
-        } catch (e) {
-          /* skip */
-        }
-        if (loaded.length >= 24) break
-      }
-      if (!alive) return
-      texturesRef.current = loaded
-      // gieo vài khối ban đầu (vài cái trên cạn, vài cái trên nước)
-      for (let i = 0; i < 6; i++) setTimeout(() => addCube(i < 2 ? 4 : 13), 200 + i * 160)
+        return tl
+          .loadAsync(url)
+          .then((t) => {
+            if (!alive) return
+            if ("colorSpace" in t) t.colorSpace = THREE.SRGBColorSpace
+            t.generateMipmaps = false
+            t.minFilter = THREE.LinearFilter
+            texturesRef.current.push(t)
+            if (!seeded && texturesRef.current.length >= 3) {
+              seeded = true
+              for (let i = 0; i < 6; i++)
+                setTimeout(() => addCube(i < 2 ? 4 : 13), i * 140)
+            }
+          })
+          .catch(() => {})
+      })
+      await Promise.allSettled(jobs)
     })()
     return () => {
       alive = false
@@ -122,17 +140,14 @@ export const Cubes = () => {
     const pick = () => tex[Math.floor(Math.random() * tex.length)]
     const mats = new Array(6)
       .fill(0)
-      .map(
-        () =>
-          new THREE.MeshStandardMaterial({ map: pick(), roughness: 0.5, metalness: 0.05 })
-      )
+      .map(() => new THREE.MeshStandardMaterial({ map: pick(), roughness: 0.5, metalness: 0.05 }))
     const ang = Math.random() * Math.PI * 2
-    const rad = radius != null ? radius : 4 + Math.random() * 14
+    const rad = radius != null ? radius : 3 + Math.random() * 14
     const id = idRef.current++
     const cube = {
       id,
       mats,
-      pos: [Math.cos(ang) * rad, 16, Math.sin(ang) * rad],
+      pos: [Math.cos(ang) * rad, 10, Math.sin(ang) * rad],
       phase: Math.random() * Math.PI * 2,
     }
     setCubes((c) => {
@@ -145,13 +160,11 @@ export const Cubes = () => {
     })
   }
 
-  // nút "Thả ảnh"
   useEffect(() => {
     if (spawnSignal > 0) addCube()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [spawnSignal])
 
-  // cầm khối
   function grab(e, id) {
     e.stopPropagation()
     const rb = bodies.current[id]
@@ -169,7 +182,7 @@ export const Cubes = () => {
     const up = () => {
       const g = grabbed.current
       if (g) {
-        g.rb.setGravityScale(1, true) // giữ nguyên vận tốc -> ném
+        g.rb.setGravityScale(1, true)
         grabbed.current = null
         setDragging(false)
       }
@@ -182,8 +195,8 @@ export const Cubes = () => {
   useFrame((state, delta) => {
     const dt = Math.min(delta, 1 / 30)
     const t = state.clock.getElapsedTime()
+    const BUOY_TH = waterLevel + SIZE * 0.4
 
-    // kéo khối đang cầm theo con trỏ
     const g = grabbed.current
     if (g && g.rb) {
       state.raycaster.setFromCamera(state.pointer, state.camera)
@@ -204,37 +217,32 @@ export const Cubes = () => {
       }
     }
 
-    // lực nổi cho khối dưới mặt nước (trừ khối đang cầm)
     for (const c of cubes) {
       const rb = bodies.current[c.id]
       if (!rb) continue
       if (g && g.id === c.id) continue
       const p = rb.translation()
-      if (p.y < waterLevel + SIZE * 0.5) {
+      if (p.y < BUOY_TH) {
         const v = rb.linvel()
         const m = rb.mass() || 4
         const targetY =
-          waterLevel + SIZE * 0.12 + Math.sin(t * waveSpeed + c.phase) * waveAmplitude * 4
+          waterLevel - SIZE * 0.1 + Math.sin(t * waveSpeed + c.phase) * waveAmplitude * 4
         let ay = (targetY - p.y) * 22 - v.y * 5
         ay = Math.max(-45, Math.min(70, ay))
         rb.applyImpulse({ x: 0, y: m * ay * dt, z: 0 }, true)
-        // hãm trôi ngang trên mặt nước
         rb.applyImpulse({ x: -v.x * m * 1.2 * dt, y: 0, z: -v.z * m * 1.2 * dt }, true)
       }
     }
   })
 
-  const cubeList = useMemo(() => cubes, [cubes])
-
   return (
     <>
       <TerrainCollider />
-      {/* sàn an toàn dưới đáy để không có khối rơi vô tận */}
       <RigidBody type="fixed">
-        <CuboidCollider args={[200, 1, 200]} position={[0, -12, 0]} />
+        <CuboidCollider args={[200, 1, 200]} position={[0, -14, 0]} />
       </RigidBody>
 
-      {cubeList.map((c) => (
+      {cubes.map((c) => (
         <RigidBody
           key={c.id}
           ref={(r) => {
@@ -242,17 +250,13 @@ export const Cubes = () => {
           }}
           position={c.pos}
           colliders="cuboid"
+          ccd
           linearDamping={0.4}
           angularDamping={0.6}
           restitution={0.2}
           friction={0.9}
         >
-          <mesh
-            material={c.mats}
-            castShadow
-            receiveShadow
-            onPointerDown={(e) => grab(e, c.id)}
-          >
+          <mesh material={c.mats} castShadow receiveShadow onPointerDown={(e) => grab(e, c.id)}>
             <boxGeometry args={[SIZE, SIZE, SIZE]} />
           </mesh>
         </RigidBody>

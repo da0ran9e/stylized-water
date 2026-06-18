@@ -1,15 +1,18 @@
 import { CameraControls, Environment } from "@react-three/drei"
 import { useControls } from "leva"
+import { Physics } from "@react-three/rapier"
 
 import { Scene } from "./Scene"
 import { Audio } from "./Audio"
-import { Cubes } from "./Cubes"
+import { Cubes, useCubesStore } from "./Cubes"
 
 export const Experience = () => {
   // Interactive color parameters
   const { BACKGROUND } = useControls("Sky", {
     BACKGROUND: { value: "#fcffdc", label: "Background" }
   })
+
+  const dragging = useCubesStore((s) => s.dragging)
 
   return (
     <>
@@ -34,6 +37,7 @@ export const Experience = () => {
       <Audio />
 
       <CameraControls
+        enabled={!dragging}
         maxPolarAngle={Math.PI / 2.2}
         maxDistance={80}
         minDistance={15}
@@ -43,7 +47,10 @@ export const Experience = () => {
       <fog attach="fog" args={[BACKGROUND, 120, 150]} />
 
       <Scene />
-      <Cubes />
+
+      <Physics gravity={[0, -9.81, 0]}>
+        <Cubes />
+      </Physics>
     </>
   )
 }

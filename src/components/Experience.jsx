@@ -3,6 +3,7 @@ import { useControls } from "leva"
 
 import { Scene } from "./Scene"
 import { Audio } from "./Audio"
+import { Cubes } from "./Cubes"
 
 export const Experience = () => {
   // Interactive color parameters
@@ -42,6 +43,7 @@ export const Experience = () => {
       <fog attach="fog" args={[BACKGROUND, 120, 150]} />
 
       <Scene />
+      <Cubes />
     </>
   )
 }

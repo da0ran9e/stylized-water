@@ -10,6 +10,8 @@ import { useStore } from "../../hooks/useStore"
 import vertexShader from "./shaders/vertex.glsl"
 import fragmentShader from "./shaders/fragment.glsl"
 
+const TERRAIN_URL = `${import.meta.env.BASE_URL}models/terrain.glb`
+
 export function Terrain() {
   // Global states
   const waterLevel = useStore((state) => state.waterLevel)
@@ -18,7 +20,7 @@ export function Terrain() {
   const foamDepth = useStore((state) => state.foamDepth)
 
   // Load model
-  const { nodes } = useGLTF("/models/terrain.glb")
+  const { nodes } = useGLTF(TERRAIN_URL)
 
   // Interactive color parameters
   const { SAND_BASE_COLOR, GRASS_BASE_COLOR, UNDERWATER_BASE_COLOR } =
@@ -99,4 +101,4 @@ export function Terrain() {
   )
 }
 
-useGLTF.preload("/models/terrain.glb")
+useGLTF.preload(TERRAIN_URL)

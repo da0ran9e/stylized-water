@@ -10,6 +10,8 @@ import { useStore } from "../../hooks/useStore"
 import vertexShader from "./shaders/vertex.glsl"
 import fragmentShader from "./shaders/fragment.glsl"
 
+const ROCKS_URL = `${import.meta.env.BASE_URL}models/rocks.glb`
+
 export function Rocks() {
   // Global states
   const waterLevel = useStore((state) => state.waterLevel)
@@ -18,7 +20,7 @@ export function Rocks() {
   const foamDepth = useStore((state) => state.foamDepth)
 
   // Load model
-  const { nodes } = useGLTF("/models/rocks.glb")
+  const { nodes } = useGLTF(ROCKS_URL)
 
   // Interactive color parameters
   const { ROCK_BASE_COLOR, MOSS_BASE_COLOR } = useControls("Rocks", {
@@ -75,4 +77,4 @@ export function Rocks() {
   )
 }
 
-useGLTF.preload("/models/rocks.glb")
+useGLTF.preload(ROCKS_URL)

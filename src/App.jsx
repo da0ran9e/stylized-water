@@ -51,7 +51,7 @@ function App() {
       <Loading />
       <Suspense>
         <div className={clsx(s.transition, { [s.show]: ready })}>
-          <Leva hidden={!ready} />
+          <Leva collapsed hidden={!ready} />
 
           <Canvas camera={{ position: [30, 10, -30], fov: 35 }} shadows>
             <Experience />

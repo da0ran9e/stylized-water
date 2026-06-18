@@ -20,7 +20,45 @@ const TERRAIN_URL = `${import.meta.env.BASE_URL}models/terrain.glb`
 
 const SIZE = 1.7
 const MAX = 30
-const LIMIT = 14 // số ảnh tải tối đa (đủ cho 6 mặt mỗi khối, dùng lại)
+const LIMIT = 10 // số ảnh tải song song tối đa
+const TEX_LOW = 40 // bản mờ hiển thị ngay
+const TEX_HIGH = 360 // bản nét nâng lên sau (vẽ lại từ ảnh đã tải)
+
+// Tải song song: hiện bản mờ chất lượng thấp trước, rồi nâng nét dần.
+// Cả hai lần đều vẽ từ MỘT ảnh đã tải (không tải lại), nên không tốn thêm mạng.
+function loadProgressive(url, onLow, idx) {
+  return new Promise((res) => {
+    const img = new Image()
+    img.crossOrigin = "anonymous"
+    img.onload = () => {
+      const c = document.createElement("canvas")
+      c.width = TEX_HIGH
+      c.height = TEX_HIGH
+      const ctx = c.getContext("2d")
+      // Lần 1: bản mờ (vẽ qua canvas nhỏ rồi phóng to)
+      const t = document.createElement("canvas")
+      t.width = TEX_LOW
+      t.height = TEX_LOW
+      t.getContext("2d").drawImage(img, 0, 0, TEX_LOW, TEX_LOW)
+      ctx.imageSmoothingEnabled = true
+      ctx.drawImage(t, 0, 0, TEX_HIGH, TEX_HIGH)
+      const tex = new THREE.CanvasTexture(c)
+      if ("colorSpace" in tex) tex.colorSpace = THREE.SRGBColorSpace
+      tex.generateMipmaps = false
+      tex.minFilter = THREE.LinearFilter
+      onLow(tex)
+      res(tex)
+      // Lần 2: nâng nét (cùng texture -> mọi khối đang dùng tự sắc nét theo)
+      setTimeout(() => {
+        ctx.clearRect(0, 0, TEX_HIGH, TEX_HIGH)
+        ctx.drawImage(img, 0, 0, TEX_HIGH, TEX_HIGH)
+        tex.needsUpdate = true
+      }, 500 + idx * 250)
+    }
+    img.onerror = () => res(null)
+    img.src = url
+  })
+}
 
 export const useCubesStore = create((set) => ({
   spawnSignal: 0,
@@ -103,28 +141,24 @@ export const Cubes = () => {
       } catch (e) {
         /* ignore */
       }
-      const tl = new THREE.TextureLoader()
-      tl.setCrossOrigin("anonymous")
       let seeded = false
-      const jobs = photos.slice(0, LIMIT).map((p) => {
+      const jobs = photos.slice(0, LIMIT).map((p, idx) => {
         const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${encodeURIComponent(
           p.name
         )}`
-        return tl
-          .loadAsync(url)
-          .then((t) => {
+        return loadProgressive(
+          url,
+          (tex) => {
             if (!alive) return
-            if ("colorSpace" in t) t.colorSpace = THREE.SRGBColorSpace
-            t.generateMipmaps = false
-            t.minFilter = THREE.LinearFilter
-            texturesRef.current.push(t)
+            texturesRef.current.push(tex)
             if (!seeded && texturesRef.current.length >= 3) {
               seeded = true
               for (let i = 0; i < 6; i++)
                 setTimeout(() => addCube(i < 2 ? 4 : 13), i * 140)
             }
-          })
-          .catch(() => {})
+          },
+          idx
+        )
       })
       await Promise.allSettled(jobs)
     })()

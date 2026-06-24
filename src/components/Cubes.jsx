@@ -116,36 +116,20 @@ export const Cubes = () => {
     ;(async () => {
       let photos = []
       try {
-        const r = await fetch(`${SUPABASE_URL}/storage/v1/object/list/${BUCKET}`, {
-          method: "POST",
-          headers: {
-            apikey: SUPABASE_KEY,
-            Authorization: "Bearer " + SUPABASE_KEY,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            prefix: "",
-            limit: 100,
-            offset: 0,
-            sortBy: { column: "created_at", order: "desc" },
-          }),
-        })
-        const items = await r.json()
-        photos = (Array.isArray(items) ? items : []).filter(
-          (it) =>
-            it &&
-            it.name &&
-            IMG_RE.test(it.name) &&
-            (!it.metadata || it.metadata.size == null || it.metadata.size > 0)
-        )
+        // chờ cổng đăng nhập (auth.js) sẵn sàng rồi lấy ảnh qua signed URL
+        for (let i = 0; i < 200 && !(window.AUTH && window.AUTH.loadAlbum); i++) {
+          await new Promise((r) => setTimeout(r, 100))
+        }
+        if (window.AUTH && window.AUTH.loadAlbum) {
+          const al = await window.AUTH.loadAlbum()
+          photos = al.list // [{name, url}]
+        }
       } catch (e) {
         /* ignore */
       }
       let seeded = false
       const jobs = photos.slice(0, LIMIT).map((p, idx) => {
-        const url = `${SUPABASE_URL}/storage/v1/object/public/${BUCKET}/${encodeURIComponent(
-          p.name
-        )}`
+        const url = p.url
         return loadProgressive(
           url,
           (tex) => {
